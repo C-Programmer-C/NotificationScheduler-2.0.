@@ -4,6 +4,8 @@ from flask import jsonify
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Union
 from conf.config import settings
+from typing import Dict, List, Optional
+import requests
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +99,25 @@ def log_and_abort(message, task_id=None, code=400):
     logger.warning(f"task {task_id} {message}.")
     return jsonify({"error": message}), code
 
+def build_mention_span(person_id: int, fullname: str) -> str:
+    """Построить span-упоминание для человека."""
+    return f'<span data-personid="{person_id}" data-type="user-mention">{fullname}</span>'
+
+def collect_manager_mentions(members_info: Dict) -> List[str]:
+    """
+    Собрать упоминания для первого и второго менеджера (если есть и полны данные).
+    Возвращает список упоминаний (может быть пустым, 1 или 2 элемента).
+    """
+    mentions: List[str] = []
+
+    for key in ("first_manager", "second_manager"):
+        mgr = members_info.get(key) or {}
+        mgr_id = mgr.get("id")
+        mgr_fullname = mgr.get("fullname")
+        # Включаем менеджера только если есть и id, и fullname
+        if mgr_id and mgr_fullname:
+            mentions.append(_build_mention_span(mgr_id, mgr_fullname))
+    return mentions
 
 def parse_and_compare_due(task_id: str, new_due: str, due: str) -> bool:
     """

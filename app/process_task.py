@@ -5,8 +5,8 @@ from app.pyrus_api import get_responsible, get_member, bot_is_subscriber, remove
 from app.texts import Texts
 from app.db_utils import cleanup_task
 from conf.config import settings
-from db_utils import delete_task, get_task_row, bump_step_and_reschedule
-from pyrus_api import send_comment, is_task_closed
+from app.db_utils import delete_task, get_task_row, bump_step_and_reschedule
+from app.pyrus_api import send_comment, is_task_closed
 
 
 logger = logging.getLogger(__name__)
@@ -50,7 +50,12 @@ def process_task(task_id: int, token: str):
             return
 
         if step == 4:
-            manager_info = get_member(settings.MANAGER_ID, token)
+            first_manager_info = get_member(settings.FIRST_MANAGER_ID, token)
+            second_manager_info = get_member(settings.SECOND_MANAGER_ID, token)
+            manager_info = {
+                "first_manager": first_manager_info,
+                "second_manager": second_manager_info
+            }
             user_info = get_responsible(task_id, token)
             send_comment(token, task_id, Texts.TEXT_TO_EMPLOYEE_WITH_MANAGER,
                          {"manager": manager_info, "user": user_info})

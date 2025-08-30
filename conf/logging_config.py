@@ -26,7 +26,7 @@ def conf_logger(log_path=None):
 
     # консольный хэндлер
     console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(logging.DEBUG)
+    console_handler.setLevel(logging.INFO)
     console_handler.setFormatter(formatter)
 
     # корневой логгер
@@ -37,6 +37,7 @@ def conf_logger(log_path=None):
     root_logger.handlers = []
     root_logger.addHandler(file_handler)
     root_logger.addHandler(console_handler)
-
+    logging.getLogger('apscheduler').setLevel(logging.WARNING)
+    
     # принудительно создаём файл и записываем первый лог
     root_logger.debug("Logger initialized, log file created")

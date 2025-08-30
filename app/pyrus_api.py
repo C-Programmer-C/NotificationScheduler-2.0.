@@ -3,9 +3,13 @@ import logging
 import time
 from typing import Type
 import requests
-
+from datetime import datetime, timezone, timedelta
+from dateutil.parser import isoparse
 from app.lock_utils import unlock_task
 from conf.config import settings
+from typing import Optional, Union
+from typing import Dict, List, Optional
+from app.utils import build_mention_span, collect_manager_mentions
 
 AUTH_URL = "https://accounts.pyrus.com/api/v4/auth"
 
@@ -120,7 +124,7 @@ def get_task(task_id: int, token: str, timeout: int = 30, check: bool = False):
     raise RuntimeError(f"Failed to parse task #{task_id}: {data}")
 
 @retry_on_exception(tries=3, delay=30,
-                    exceptions=(RuntimeError, requests.RequestException))
+                    exceptions=(RuntimeError, requests.RequestException), unlock_on_fail=True)
 def remove_bot_from_subscribers(task_id: int, token: str, timeout: int = 30):
     headers = {"Authorization": f"Bearer {token}"}
     url = build_comments_api_url(task_id)
@@ -147,7 +151,7 @@ def remove_bot_from_subscribers(task_id: int, token: str, timeout: int = 30):
     raise APIError(f"Couldn't send comment: invalid API response #{task_id}: {data}")
 
 @retry_on_exception(tries=3, delay=30,
-                    exceptions=(RuntimeError, requests.RequestException))
+                    exceptions=(RuntimeError, requests.RequestException), unlock_on_fail=True)
 def bot_is_subscriber(task_id: int, token: str, timeout: int = 30) -> bool:
     task = get_task(task_id, token, timeout)
 
@@ -187,7 +191,7 @@ def get_token(login: str, security_key: str, timeout: int = 30) -> str:
 
 
 @retry_on_exception(tries=3, delay=30.0,
-                    exceptions=(APIError, requests.RequestException))
+                    exceptions=(APIError, requests.RequestException), unlock_on_fail=True)
 def is_task_closed(task_id: int, token: str, timeout: int = 30) -> bool:
     task = get_task(task_id, token, timeout)
     return bool(task.get("close_date") or task.get("is_closed"))
@@ -195,7 +199,8 @@ def is_task_closed(task_id: int, token: str, timeout: int = 30) -> bool:
 @retry_on_exception(
     tries=3,
     delay=30.0,
-    exceptions=(APIError, requests.RequestException)
+    exceptions=(APIError, requests.RequestException),
+    unlock_on_fail=True
 )
 def get_member(task_id: int, token: str, timeout: int = 30) -> dict:
     """Получить информацию о сотруднике по ID задачи."""
@@ -230,7 +235,8 @@ def get_member(task_id: int, token: str, timeout: int = 30) -> dict:
 @retry_on_exception(
     tries=3,
     delay=30.0,
-    exceptions=(APIError, requests.RequestException)
+    exceptions=(APIError, requests.RequestException),
+    unlock_on_fail=True
 )
 def get_due(task_id: int, token: str, timeout: int = 30):
     """Получить срок выполнения задачи (due) по её ID."""
@@ -245,7 +251,8 @@ def get_due(task_id: int, token: str, timeout: int = 30):
 @retry_on_exception(
     tries=3,
     delay=30.0,
-    exceptions=(APIError, requests.RequestException)
+    exceptions=(APIError, requests.RequestException),
+    unlock_on_fail=True
 )
 def get_responsible(task_id: int, token: str, timeout: int = 30) -> dict:
     """Получить информацию об ответственном сотруднике по задаче."""
@@ -274,38 +281,33 @@ def get_responsible(task_id: int, token: str, timeout: int = 30) -> dict:
 @retry_on_exception(
     tries=3,
     delay=30.0,
-    exceptions=(APIError, requests.RequestException)
+    exceptions=(APIError, requests.RequestException),
+    unlock_on_fail=True
 )
 def send_comment(token: str, task_id: int, text: str, members_info: dict, timeout: int = 30) -> bool:
     """Отправить комментарий в задачу с упоминанием сотрудника."""
     headers = {"Authorization": f"Bearer {token}"}
     url = build_comments_api_url(task_id)
-
     user_info = members_info.get("user") or {}
-    manager_info = members_info.get("manager") or {}
+
+    managers_info = members_info.get("manager") or {}
+    first_manager_info = managers_info.get("first_manager") or {}
+    second_manager_info = managers_info.get("second_manager") or {}
 
     user_id = user_info.get("id") or members_info.get("id")
     user_fullname = user_info.get("fullname") or members_info.get("fullname")
 
-    manager_id = manager_info.get("id")
-    manager_fullname = manager_info.get("fullname")
-    if manager_info and (not manager_id or not manager_fullname):
-        raise APIError(f"Information about the supervisor is missing in the issue #{task_id}")
+    if not user_id or not user_fullname:
+        raise APIError(f"Information about the user is missing in the issue #{task_id}")
 
-    if manager_id and manager_fullname:
-        body = {
-            "formatted_text": (
-                f'<span data-personid="{user_id}" data-type="user-mention">{user_fullname}</span>, '
-                f'<span data-personid="{manager_id}" data-type="user-mention">{manager_fullname}</span>, {text}'
-            )
-        }
-    else:
-        body = {
-            "formatted_text": (
-                f'<span data-personid="{user_id}" data-type="user-mention">{user_fullname}</span>, {text}'
-            )
-        }
+    user_mention = build_mention_span(user_id, user_fullname)
 
+    manager_mentions = collect_manager_mentions(members_info)
+
+    mentions_part = ", ".join([user_mention] + manager_mentions)
+    formatted_text = f"{mentions_part}, {text}"
+
+    body = {"formatted_text": formatted_text}
     if not body:
         raise RuntimeError(f"An error occurred when forming the request body for creating a comment in the issue. #{task_id}")
 

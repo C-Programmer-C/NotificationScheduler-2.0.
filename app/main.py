@@ -9,6 +9,8 @@ from app.db_utils import insert_task, has_task, init_db
 from app.utils import normalize_due, create_iso_date_with_duration
 import sqlite3
 from app.utils import log_and_abort, last_comment_has_bot
+from app.verify_signature import validate_pyrus_request
+from conf.config import settings
 
 app = Flask(__name__)
 
@@ -17,6 +19,11 @@ logger = logging.getLogger(__name__)
 @app.route('/webhook', methods=['POST'])
 def webhook():
     data = request.get_json(silent=True)
+    
+    raw = validate_pyrus_request(request, settings.SECURITY_KEY)
+    
+    if not raw:
+        return log_and_abort("invalid request")
 
     if not data:
         return log_and_abort("invalid or missing json")
@@ -89,6 +96,29 @@ def webhook():
 
     return '', 200
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
+    from apscheduler.schedulers.background import BackgroundScheduler
+    from app.scan_tasks import scanner_job
+    from conf.config import settings
+
     init_db()
-    serve(app, host="0.0.0.0", port=8080)
+
+    # Настройка и запуск планировщика
+    scheduler = BackgroundScheduler()
+    scheduler.add_job(
+        scanner_job, "interval", seconds=settings.SCAN_INTERVAL, id="scanner_job"
+    )
+    scheduler.start()
+    logger.debug(
+        "Scheduler started and will run every %s seconds.",
+        settings.SCAN_INTERVAL,
+    )
+
+    try:
+        # Запуск веб-сервера
+        serve(app, host="0.0.0.0", port=8080)
+    except (KeyboardInterrupt, SystemExit):
+        # Корректное завершение работы планировщика
+        scheduler.shutdown()
+        logger.info("Scheduler has been stopped.")
